@@ -1,0 +1,48 @@
+[package]
+name = "gpui-base-framework"
+version = "0.1.0"
+edition = "2024"
+description = "A production-minded starter template for building desktop apps with GPUI"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/binbandit/gpui-base-framework"
+homepage = "https://github.com/binbandit/gpui-base-framework"
+readme = "README.md"
+keywords = ["desktop", "gui", "gpui", "template"]
+categories = ["gui"]
+rust-version = "1.94"
+publish = false
+
+# --- template setup:start ---
+# Run ./setup.sh <your-app-name> to make this project yours. The script
+# renames the crate, resets package metadata, and can produce a binary-only
+# app (--app-only) or a bare minimal GPUI project (--minimal).
+# This comment block is removed automatically by the script.
+# --- template setup:end ---
+
+[dependencies]
+anyhow = "1.0"
+directories = "6.0"
+# `runtime_shaders` avoids requiring Apple's optional Metal Toolchain just to
+# build on macOS. Release builds can remove it after installing that component.
+gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
+rust-embed = "8.7"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+gpui = { version = "=0.2.2", features = ["runtime_shaders", "test-support"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

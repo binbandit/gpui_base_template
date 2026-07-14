@@ -1,0 +1,7 @@
+/target
+/.pi-subagents/
+.DS_Store
+*.log
+.env
+.idea/
+.vscode/

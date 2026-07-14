@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target.name }})
+    runs-on: ${{ matrix.target.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: linux-x86_64, os: ubuntu-latest, kind: linux }
+          - { name: linux-arm64, os: ubuntu-24.04-arm, kind: linux }
+          - { name: macos-arm64, os: macos-latest, kind: macos }
+          - { name: macos-x86_64, os: macos-15-intel, kind: macos }
+          - { name: windows-x86_64, os: windows-latest, kind: windows }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux GPUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang libfontconfig-dev libwayland-dev libxkbcommon-dev \
+            libxkbcommon-x11-dev libxcb1-dev libx11-xcb-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libvulkan-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release --locked
+
+      - name: Package
+        shell: bash
+        env:
+          TARGET_KIND: ${{ matrix.target.kind }}
+          TARGET_NAME: ${{ matrix.target.name }}
+        run: |
+          set -euo pipefail
+          NAME="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name')"
+          IDENT="$(printf '%s' "$NAME" | tr '-' '_')"
+          STEM="$NAME-$GITHUB_REF_NAME-$TARGET_NAME"
+
+          case "$TARGET_KIND" in
+            macos)
+              APP="$STEM.app"
+              mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+              cp "target/release/$NAME" "$APP/Contents/MacOS/$NAME"
+              cp LICENSE-MIT LICENSE-APACHE "$APP/Contents/Resources/"
+              cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>$NAME</string>
+            <key>CFBundleIdentifier</key><string>dev.gpui.$IDENT</string>
+            <key>CFBundleName</key><string>$NAME</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${GITHUB_REF_NAME#v}</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+              ditto -c -k --sequesterRsrc --keepParent "$APP" "$STEM.zip"
+              ASSET="$STEM.zip"
+              ;;
+            windows)
+              mkdir "$STEM"
+              cp "target/release/$NAME.exe" "$STEM/"
+              cp README.md LICENSE-* "$STEM/"
+              7z a "$STEM.zip" "$STEM"
+              ASSET="$STEM.zip"
+              ;;
+            linux)
+              mkdir "$STEM"
+              cp "target/release/$NAME" "$STEM/"
+              cp README.md LICENSE-* "$STEM/"
+              tar czf "$STEM.tar.gz" "$STEM"
+              ASSET="$STEM.tar.gz"
+              ;;
+          esac
+
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$ASSET" > "$ASSET.sha256"
+          else
+            shasum -a 256 "$ASSET" > "$ASSET.sha256"
+          fi
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+
+      - name: Upload release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" --generate-notes 2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --clobber
