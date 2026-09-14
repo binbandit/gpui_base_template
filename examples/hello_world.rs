@@ -15,8 +15,8 @@ impl Render for HelloWorld {
             .size_full()
             .items_center()
             .justify_center()
-            .bg(rgb(0x111820))
-            .text_color(rgb(0xF5F1EA))
+            .bg(rgb(0x16181D))
+            .text_color(rgb(0xEDF0F5))
             .text_xl()
             .child("Hello from GPUI")
     }

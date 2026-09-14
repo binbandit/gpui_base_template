@@ -39,8 +39,7 @@ impl<A: Action + Clone> RenderOnce for Toggle<A> {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::current(cx);
         let checked = self.checked;
-        let click_action = self.action.clone();
-        let key_action = self.action;
+        let action = self.action;
 
         div()
             .id(self.id)
@@ -55,20 +54,17 @@ impl<A: Action + Clone> RenderOnce for Toggle<A> {
             .rounded_lg()
             .border_1()
             .border_color(gpui::transparent_black())
-            .focus(|style| style.border_2().border_color(theme.focus_ring))
+            .focus(|style| style.border_color(theme.focus_ring))
             .cursor_pointer()
             .on_click(move |_, window, cx| {
-                window.dispatch_action(click_action.boxed_clone(), cx);
-            })
-            .on_key_down(move |event, window, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    window.dispatch_action(key_action.boxed_clone(), cx);
-                }
+                window.dispatch_action(action.boxed_clone(), cx);
             })
             .child(
                 div()
                     .flex()
                     .flex_col()
+                    .flex_1()
+                    .min_w(px(0.0))
                     .gap_1()
                     .child(
                         div()
@@ -88,7 +84,8 @@ impl<A: Action + Clone> RenderOnce for Toggle<A> {
                 div()
                     .flex()
                     .items_center()
-                    .w(px(44.0))
+                    .flex_none()
+                    .w(px(40.0))
                     .h(px(24.0))
                     .p(px(3.0))
                     .rounded_full()
@@ -112,7 +109,7 @@ impl<A: Action + Clone> RenderOnce for Toggle<A> {
                             } else {
                                 theme.text_faint
                             })
-                            .when(checked, |thumb| thumb.ml(px(18.0))),
+                            .when(checked, |thumb| thumb.ml(px(14.0))),
                     ),
             )
     }

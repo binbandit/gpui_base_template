@@ -54,7 +54,7 @@ impl RenderOnce for Card {
             .flex_col()
             .gap_4()
             .p_5()
-            .rounded_xl()
+            .rounded_lg()
             .border_1()
             .border_color(if self.elevated {
                 theme.border_strong
@@ -62,7 +62,7 @@ impl RenderOnce for Card {
                 theme.border
             })
             .bg(theme.surface)
-            .when(self.elevated, |card| card.shadow_lg())
+            .when(self.elevated, |card| card.shadow_sm())
             .children(title.map(|title| {
                 div()
                     .text_sm()

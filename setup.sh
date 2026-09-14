@@ -79,6 +79,10 @@ if ! $ASSUME_YES && ! $FRESH_GIT && [ -d .git ]; then
 fi
 
 command -v cargo >/dev/null 2>&1 || err "cargo is required to validate the generated project"
+cargo fmt --version >/dev/null 2>&1 || err "rustfmt is required (install it with rustup component add rustfmt)"
+if $FRESH_GIT && [ -f .git ]; then
+    err "--fresh-git cannot replace a linked worktree; copy the project outside its worktree first"
+fi
 
 GIT_NAME="$(git config user.name 2>/dev/null || true)"
 GIT_EMAIL="$(git config user.email 2>/dev/null || true)"
@@ -98,8 +102,6 @@ rollback_on_error() {
     trap - EXIT
     if ! $SETUP_COMPLETE; then
         tar -xf "$BACKUP_DIR/project.tar" -C .
-        find src examples docs -type f -name '*.bak' -delete 2>/dev/null || true
-        rm -f ./*.bak Cargo.toml.new src/main.rs.new
         if $GIT_REPLACED; then
             rm -rf .git
             if [ -d "$BACKUP_DIR/original.git" ]; then
@@ -115,47 +117,56 @@ trap rollback_on_error EXIT
 
 echo "Setting up '$NAME'..."
 
+# Write through a temporary file outside the project. In-place sed backup
+# suffixes could overwrite a developer's existing backup files.
+edit_file() {
+    local file="$1"
+    shift
+    sed "$@" "$file" > "$BACKUP_DIR/edited"
+    cat "$BACKUP_DIR/edited" > "$file"
+}
+
 # Literal replacement is intentional: template invariants keep these names
 # unsplit so BSD and GNU userlands can perform the same simple transformation.
-find src examples -type f -name '*.rs' \
-    -exec sed -i.bak -e "s/$OLD_IDENT/$IDENT/g" -e "s/$OLD_PKG/$NAME/g" {} + 2>/dev/null || true
-for f in Cargo.toml Cargo.lock ./*.md docs/*.md examples/*.md; do
-    [ -f "$f" ] || continue
-    sed -i.bak -e "s/$OLD_IDENT/$IDENT/g" -e "s/$OLD_PKG/$NAME/g" "$f"
+for directory in src examples; do
+    [ -d "$directory" ] || continue
+    while IFS= read -r -d '' file; do
+        edit_file "$file" -e "s/$OLD_IDENT/$IDENT/g" -e "s/$OLD_PKG/$NAME/g"
+    done < <(find "$directory" -type f -name '*.rs' -print0)
 done
-find src examples docs -type f -name '*.bak' -delete 2>/dev/null || true
-rm -f ./*.bak
+for file in Cargo.toml Cargo.lock ./*.md docs/*.md examples/*.md; do
+    [ -f "$file" ] || continue
+    edit_file "$file" -e "s/$OLD_IDENT/$IDENT/g" -e "s/$OLD_PKG/$NAME/g"
+done
 note "renamed crate to '$NAME' (module path '$IDENT')"
 
 # Removing a previous value makes retries safe. Quotes and backslashes from Git
 # configuration are escaped for a TOML basic string.
-sed -i.bak -e '/^authors = /d' Cargo.toml && rm -f Cargo.toml.bak
+edit_file Cargo.toml -e '/^authors = /d'
 if [ -n "$GIT_NAME" ]; then
     AUTHOR="$GIT_NAME${GIT_EMAIL:+ <$GIT_EMAIL>}"
     AUTHOR_ESCAPED="$(printf '%s' "$AUTHOR" | sed -e 's/\\/\\\\\\\\/g' -e 's/"/\\\\\\"/g')"
-    sed -i.bak "/^version = /a\\
-authors = [\"$AUTHOR_ESCAPED\"]" Cargo.toml && rm -f Cargo.toml.bak
+    edit_file Cargo.toml "/^version = /a\\
+authors = [\"$AUTHOR_ESCAPED\"]"
     note "set authors from git config"
 else
     note "left authors unset (git config has no user.name)"
 fi
 
-sed -i.bak \
+edit_file Cargo.toml \
     -e 's|^description = .*|description = "TODO: describe your app"|' \
     -e '/^repository = /d' \
     -e '/^homepage = /d' \
     -e '/^keywords = /d' \
-    -e '/^categories = /d' \
-    Cargo.toml && rm -f Cargo.toml.bak
+    -e '/^categories = /d'
 note "reset package metadata"
 
-sed -i.bak '/^# --- template setup:start ---$/,/^# --- template setup:end ---$/d' Cargo.toml && rm -f Cargo.toml.bak
-sed -i.bak '/^$/N;/^\n$/D' Cargo.toml && rm -f Cargo.toml.bak
+edit_file Cargo.toml '/^# --- template setup:start ---$/,/^# --- template setup:end ---$/d'
+edit_file Cargo.toml '/^$/N;/^\n$/D'
 
 if [ -f AGENTS.md ]; then
-    sed -i.bak '/<!-- template-only:start -->/,/<!-- template-only:end -->/d' AGENTS.md \
-        && rm -f AGENTS.md.bak
-    sed -i.bak '/^$/N;/^\n$/D' AGENTS.md && rm -f AGENTS.md.bak
+    edit_file AGENTS.md '/<!-- template-only:start -->/,/<!-- template-only:end -->/d'
+    edit_file AGENTS.md '/^$/N;/^\n$/D'
     note "trimmed AGENTS.md to the generated-app guide"
 fi
 
@@ -173,18 +184,18 @@ if $MINIMAL; then
             in_dependencies = 0
         }
         in_dev { next }
-        in_dependencies && /^(anyhow|directories|rust-embed|serde|serde_json|tracing|tracing-subscriber) =/ { next }
+        in_dependencies && /^(anyhow|directories|rust-embed|serde|serde_json|tempfile|tracing|tracing-subscriber) =/ { next }
         { print }
-    ' Cargo.toml > Cargo.toml.new && mv Cargo.toml.new Cargo.toml
+    ' Cargo.toml > "$BACKUP_DIR/edited"
+    cat "$BACKUP_DIR/edited" > Cargo.toml
     note "created a minimal one-file GPUI app"
 elif $APP_ONLY; then
     rm -f src/lib.rs
     rm -rf examples
 
-    find src -type f -name '*.rs' -exec sed -i.bak \
-        -e "s/use $IDENT::/use crate::app::/g" \
-        -e "s/$IDENT::/crate::app::/g" {} +
-    find src -name '*.bak' -delete
+    # The launcher is the only file allowed to import through the crate root.
+    # Keep src/app byte-for-byte portable between library and binary projects.
+    edit_file src/main.rs -e "s/$IDENT::/crate::app::/g"
 
     awk '!done && /^use / {
              print "#[allow(dead_code, unused_imports)]"
@@ -192,7 +203,8 @@ elif $APP_ONLY; then
              print ""
              done = 1
          }
-         { print }' src/main.rs > src/main.rs.new && mv src/main.rs.new src/main.rs
+         { print }' src/main.rs > "$BACKUP_DIR/edited"
+    cat "$BACKUP_DIR/edited" > src/main.rs
     grep -q '^mod app;' src/main.rs \
         || err "could not insert 'mod app;' into src/main.rs (no top-level use line found?)"
     note "converted to a binary-only app (application lives in src/app/)"
@@ -234,7 +246,7 @@ else
 TODO: describe your application.
 
 A native Rust desktop app built with GPUI. The starter includes a responsive
-shell, semantic themes, actions and shortcuts, embedded assets, durable settings,
+shell, semantic themes, actions and shortcuts, embedded assets, atomic settings,
 structured logging, async work, tests, and native release automation.
 
 ## Run
@@ -244,7 +256,7 @@ structured logging, async work, tests, and native release automation.
 ## Start building
 
 - src/main.rs: launcher
-- src/app/root.rs: state, tasks, subscriptions, and action handlers
+- src/app/root.rs: state, tasks, and action handlers
 - src/app/actions.rs: logical commands and shortcuts
 - src/app/components/: public reusable controls and their guide
 - src/app/pages/: one module per route-level screen
@@ -266,18 +278,19 @@ shipping.
     cargo clippy --all-targets --all-features -- -D warnings
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
-Tag a version such as v0.1.0 to run the native release workflow. Configure
-bundle identifiers, signing, notarization, icons, and your update strategy before
-distribution.
+Push a version tag such as v0.1.0 to run the native release workflow. A new
+release stays a draft until every platform archive and checksum has uploaded
+successfully. Configure bundle identifiers, signing, notarization, icons, and
+your update strategy before distribution.
 
 Licensed under MIT or Apache-2.0.
 README
 fi
-sed -i.bak "s/__PROJECT_NAME__/$NAME/g" README.md && rm -f README.md.bak
+edit_file README.md "s/__PROJECT_NAME__/$NAME/g"
 note "wrote an app-facing README.md"
 
 echo "Verifying generated project..."
-cargo fmt --quiet 2>/dev/null || true
+cargo fmt --all --quiet
 cargo check --all-targets --quiet
 note "cargo check passed"
 

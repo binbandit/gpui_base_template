@@ -5,12 +5,8 @@
 //! tokens, and dispatch typed GPUI actions. Stateful controls should instead own
 //! an `Entity<T>` and implement `Render`; do not invent a second lifecycle.
 //!
-//! ```no_run
-//! use gpui_base_framework::app::components::{Button, ButtonVariant};
-//! # gpui::actions!(docs, [Save]);
-//! let button = Button::new("save", "Save", Save).variant(ButtonVariant::Primary);
-//! # let _ = button;
-//! ```
+//! Construct a [`Button`] with a stable element ID, a label, and a typed action.
+//! Use [`ButtonVariant`] for emphasis and [`ButtonSize`] for density.
 
 mod badge;
 mod button;

@@ -32,12 +32,16 @@ Test with a keyboard in both themes:
 
 1. Tab and Shift-Tab through every route and control.
 2. Confirm focus never disappears and follows a logical order.
-3. Activate controls with Enter and Space.
-4. Confirm disabled controls are skipped.
+3. Activate controls with Enter and Space, including key release; each press
+   should perform the action exactly once.
+4. Confirm disabled controls are skipped. Start the job with its button focused
+   and verify navigation shortcuts still work while the button is disabled.
+   Change pages from a focused page control and verify shortcuts still work.
 5. Resize from the default size down to the 720 × 520 minimum.
-6. Verify content stacks, remains readable, and scrolls without clipping.
-7. Trigger settings corruption, save failure, async completion, and clipboard
-   feedback; verify each message is visible and actionable.
+6. Verify content stacks, remains readable, and scrolls without clipping. Scroll
+   one route, then open another and check that its offset is independent.
+7. Trigger settings corruption, save failure, and async completion; verify each
+   message is visible and understandable.
 8. Verify shortcut labels and behavior on every supported operating system.
 
 Then test with the platform screen reader and accessibility inspector. On the

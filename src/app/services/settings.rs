@@ -4,16 +4,16 @@ use crate::app::theme::ThemeMode;
 use anyhow::{Context as _, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File};
+use std::fs;
 use std::io::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use tempfile::NamedTempFile;
 
 /// Preferences that survive restarts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
     pub theme: ThemeMode,
-    pub animations: bool,
     pub compact_sidebar: bool,
 }
 
@@ -21,7 +21,6 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme: ThemeMode::Dark,
-            animations: true,
             compact_sidebar: false,
         }
     }
@@ -61,7 +60,7 @@ impl SettingsStore {
     }
 
     #[cfg(test)]
-    fn at(path: PathBuf) -> Self {
+    pub(crate) fn at(path: PathBuf) -> Self {
         Self { path }
     }
 
@@ -79,85 +78,39 @@ impl SettingsStore {
             }
             Err(error) => (
                 AppSettings::default(),
-                Some(format!("Settings were reset: {error:#}")),
+                Some(format!(
+                    "Could not load preferences; using defaults: {error:#}"
+                )),
             ),
         }
     }
 
+    /// Reads and decodes the preferences, preserving errors for the caller.
     pub fn load(&self) -> Result<AppSettings> {
-        #[cfg(target_os = "windows")]
-        recover_interrupted_replace(&self.path)?;
-
         let bytes =
             fs::read(&self.path).with_context(|| format!("read {}", self.path.display()))?;
         serde_json::from_slice(&bytes).with_context(|| format!("parse {}", self.path.display()))
     }
 
+    /// Atomically replaces preferences after flushing the new file contents.
     pub fn save(&self, settings: &AppSettings) -> Result<()> {
         let parent = self.path.parent().context("settings path has no parent")?;
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
 
         let json = serde_json::to_vec_pretty(settings).context("serialize settings")?;
-        write_atomically(&self.path, &json)
-    }
-}
-
-fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
-    let temporary = path.with_extension("json.tmp");
-    let mut file =
-        File::create(&temporary).with_context(|| format!("create {}", temporary.display()))?;
-    file.write_all(bytes)
-        .with_context(|| format!("write {}", temporary.display()))?;
-    file.sync_all()
-        .with_context(|| format!("flush {}", temporary.display()))?;
-    drop(file);
-
-    replace_file(&temporary, path)
-}
-
-#[cfg(not(target_os = "windows"))]
-fn replace_file(temporary: &Path, destination: &Path) -> Result<()> {
-    // POSIX rename replaces the destination atomically, so the previous valid
-    // settings file remains intact until the new one is ready.
-    fs::rename(temporary, destination).with_context(|| format!("commit {}", destination.display()))
-}
-
-#[cfg(target_os = "windows")]
-fn recover_interrupted_replace(destination: &Path) -> Result<()> {
-    let backup = destination.with_extension("json.previous");
-    if !destination.exists() && backup.exists() {
-        fs::rename(&backup, destination)
-            .with_context(|| format!("recover {}", destination.display()))?;
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn replace_file(temporary: &Path, destination: &Path) -> Result<()> {
-    // `std::fs::rename` cannot replace an existing Windows file. Preserve the
-    // last valid copy and roll it back if committing the replacement fails.
-    let backup = destination.with_extension("json.previous");
-    let had_destination = destination.exists();
-
-    if had_destination {
-        let _ = fs::remove_file(&backup);
-        fs::rename(destination, &backup)
-            .with_context(|| format!("preserve {}", destination.display()))?;
-    }
-
-    match fs::rename(temporary, destination) {
-        Ok(()) => {
-            if had_destination {
-                let _ = fs::remove_file(backup);
-            }
-            Ok(())
-        }
-        Err(error) => {
-            if had_destination {
-                let _ = fs::rename(&backup, destination);
-            }
-            Err(error).with_context(|| format!("commit {}", destination.display()))
-        }
+        // Use a unique file in the same directory: concurrent instances never
+        // share a staging file, and persist replaces atomically on all hosts.
+        let mut temporary = NamedTempFile::new_in(parent)
+            .with_context(|| format!("create temporary preferences in {}", parent.display()))?;
+        temporary.write_all(&json).context("write preferences")?;
+        temporary
+            .as_file()
+            .sync_all()
+            .context("flush preferences")?;
+        temporary
+            .persist(&self.path)
+            .with_context(|| format!("replace {}", self.path.display()))?;
+        Ok(())
     }
 }
 
@@ -166,39 +119,54 @@ mod tests {
     use super::{AppSettings, SettingsStore};
     use crate::app::theme::ThemeMode;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn test_path(name: &str) -> std::path::PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("gpui-base-{name}-{}-{nonce}", std::process::id()))
-    }
+    use tempfile::tempdir;
 
     #[test]
     fn settings_round_trip() {
-        let root = test_path("round-trip");
+        let directory = tempdir().unwrap();
+        let root = directory.path();
         let store = SettingsStore::at(root.join("settings.json"));
         let expected = AppSettings {
             theme: ThemeMode::Light,
-            animations: false,
             compact_sidebar: true,
         };
 
         store.save(&AppSettings::default()).unwrap();
         store.save(&expected).unwrap();
         assert_eq!(store.load().unwrap(), expected);
-        assert!(!root.join("settings.json.tmp").exists());
-        assert!(!root.join("settings.json.previous").exists());
+        assert_eq!(fs::read_dir(root).unwrap().count(), 1);
+    }
 
-        let _ = fs::remove_dir_all(root);
+    #[test]
+    fn missing_preferences_use_defaults_without_warning() {
+        let directory = tempdir().unwrap();
+        let store = SettingsStore::at(directory.path().join("missing/settings.json"));
+        assert_eq!(store.load_or_default(), (AppSettings::default(), None));
+    }
+
+    #[test]
+    fn older_preferences_keep_new_defaults_and_ignore_removed_fields() {
+        let settings: AppSettings =
+            serde_json::from_str(r#"{"theme":"light","animations":false}"#).unwrap();
+        assert_eq!(settings.theme, ThemeMode::Light);
+        assert!(!settings.compact_sidebar);
+    }
+
+    #[test]
+    fn failed_replace_cleans_up_the_temporary_file() {
+        let directory = tempdir().unwrap();
+        let destination = directory.path().join("settings.json");
+        fs::create_dir(&destination).unwrap();
+        let store = SettingsStore::at(destination.clone());
+        assert!(store.save(&AppSettings::default()).is_err());
+        assert!(destination.is_dir());
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[test]
     fn malformed_settings_fall_back_with_a_warning() {
-        let root = test_path("malformed");
-        fs::create_dir_all(&root).unwrap();
+        let directory = tempdir().unwrap();
+        let root = directory.path();
         fs::write(root.join("settings.json"), b"not json").unwrap();
         let store = SettingsStore::at(root.join("settings.json"));
 
@@ -206,6 +174,6 @@ mod tests {
 
         assert_eq!(settings, AppSettings::default());
         assert!(warning.is_some());
-        let _ = fs::remove_dir_all(root);
+        assert_eq!(fs::read(root.join("settings.json")).unwrap(), b"not json");
     }
 }

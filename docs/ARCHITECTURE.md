@@ -1,110 +1,96 @@
 # Architecture
 
-## Intent
+The starter uses GPUI's entity, rendering, action, and executor model directly.
+The code belongs to the generated application; there is no wrapper framework to
+learn or preserve.
 
-This template teaches GPUI rather than hiding it. It adds product scaffolding —
-startup, a visual system, persistence, assets, logging, tests, packaging, and
-examples — but does not add a competing component lifecycle or state runtime.
+## Ownership
 
-## Boundaries
+`app::run` initializes logging, loads preferences, installs the global theme,
+binds shortcuts, and opens a window containing `Entity<RootView>`.
 
-```text
-main.rs
-  └─ app::run
-       ├─ tracing initialization
-       ├─ SettingsStore::load_or_default
-       ├─ Application::new().with_assets(...)
-       ├─ global Theme installation
-       ├─ action/key binding registration
-       └─ main window → Entity<RootView>
+`RootView` owns route state, preferences, notices, and the demo's `Option<Task<()>>`.
+Actions mutate that state and call `cx.notify()` when the view should redraw.
+Route and demo state types live in `state.rs`; keep future domain transitions
+there when they can be tested without a window. The timer is a demonstration; it performs no network work.
 
-RootView (GPUI entity + coordinator)
-  ├─ Route / SyncState        pure state
-  ├─ AppSettings              serializable preferences
-  ├─ SyncModel                typed event emitter
-  ├─ retained Task            async lifetime
-  ├─ pages/                   route-level composition
-  ├─ shell/                   stable window chrome
-  ├─ components/              reusable public controls
-  └─ services/SettingsStore   filesystem boundary
-```
+| Module | Put here |
+| --- | --- |
+| `root.rs` | State ownership, action handling, and async lifetime |
+| `pages/` | Route composition and page-only helpers |
+| `shell/` | Navigation, header, and global notices |
+| `components/` | Shared stateless/controlled `RenderOnce` controls |
+| `services/` | Filesystem, network, and OS boundaries |
+| `theme.rs` | Semantic theme tokens and the process-wide theme global |
 
-## Why `src/app/` is self-contained
+Use an `Entity<T>` when data or behavior needs a persistent owner. Plain values
+are enough for render-local data and pure domain state. Stateful editors may need
+`Render` or a custom `Element`; avoid forcing every control into a common trait.
 
-All implementation modules import siblings through `crate::app`. `src/lib.rs`
-only exports that module. This makes `setup.sh --app-only` mechanical: remove the
-library target, declare `mod app` in the binary, and keep every implementation
-file unchanged. Do not import application internals through the package name
-from inside `src/app/`.
+## Task and subscription lifetimes
 
-## State placement
+A dropped `Task` cancels its future. The root retains its task while work is
+running, then clears it after completion. A weak entity update after `await`
+returns an error if the entity has been released; that is a normal lifecycle
+outcome, not a reason to panic. Expensive/blocking work belongs on the background
+executor, with results returned through a foreground entity update.
 
-Use the narrowest owner that matches the lifetime:
+A dropped `Subscription` unsubscribes. Store subscriptions on their owner when
+adding entity observers or typed events. The starter's last-window-close observer
+is deliberately detached because it belongs to the application lifetime. Add
+`EventEmitter` only for actual communication between entities; a single view can
+update its own state directly.
 
-- A local render-only value stays local.
-- Stateful UI or domain data shared by views becomes `Entity<T>`.
-- A view calls `cx.notify()` after a change that should redraw or notify
-  observers.
-- Typed facts crossing entity boundaries use `EventEmitter<E>`, `cx.emit`, and
-  `cx.subscribe`.
-- Truly process-wide values use `Global`. This starter uses a global only for
-  the theme because overlays and additional windows must agree.
-- Durable values are represented by `AppSettings` and written through
-  `SettingsStore`; GPUI entities do not perform ad-hoc filesystem IO.
+## Input and focus
 
-## Subscription and task lifetimes
+Pointer and keyboard input dispatch typed actions to the same handlers. A root
+focus handle establishes the action context. Interactive controls have stable
+IDs, tab stops, and visible focus. Root actions call `focus_next`/`focus_prev`
+for Tab traversal. GPUI invokes a focused div's `on_click` handler on Enter/Space
+key release, so controls do not add a second keyboard activation handler.
+Disabled buttons retain their focus identity with `.tab_index(0)` but use
+`.tab_stop(false)` and omit click handlers. This keeps shortcuts reachable if a
+focused button becomes disabled. Navigation restores the persistent root focus
+before the old page disappears. Each route has its own scroll-container ID so
+scrolling one page does not set the next page’s offset. Notices survive navigation
+until dismissed or replaced by a later operation.
 
-Dropping a GPUI `Subscription` unsubscribes. `RootView` stores its sync
-subscription in `_sync_subscription`, documenting that it must live exactly as
-long as the view.
+Use `secondary-` bindings for Command on macOS and Ctrl elsewhere. See
+[the GPUI key syntax](https://docs.rs/gpui/0.2.2/gpui/struct.Keystroke.html#method.parse).
+Focus support does not imply semantic accessibility; see
+[the API boundary](ACCESSIBILITY.md).
 
-Dropping a GPUI `Task` cancels it. The async demo stores the task while active and
-clears it when the typed completion event arrives. Use `.detach()` only when work
-must outlive its initiating view and cannot update released UI.
+## Persistence and errors
 
-## Rendering and feature placement
+`SettingsStore` owns the configuration path and serialization. Missing files use
+defaults. Invalid or unreadable files use defaults with a visible warning. Save
+failures preserve the session change and report an error, rather than crashing.
+Writes use a uniquely named `tempfile::NamedTempFile` in the destination
+directory, flush its contents, and atomically replace the settings file with
+`persist`. Corrupt input remains untouched until the user changes a preference.
+Older settings can omit new fields, and removed fields are ignored. Only theme
+and compact navigation are persisted; the counter, route, and job status reset
+on launch. Configure the application identity before release and plan a
+migration if it changes later.
 
-`RootView::render` selects a route module and assembles the window shell each
-frame; it does not contain screen-sized presentation helpers. The boundaries are:
+Failure to create the native window is fatal. Ordinary operation, preference,
+and filesystem failures are recoverable: attach useful tracing context and show
+a user-facing notice. Do not silently swallow actual operation failures.
 
-- `pages/`: one module per route, plus page-private helper views;
-- `components/`: reusable controlled/stateless UI, publicly exported through
-  `app::components`;
-- `shell/`: navigation, header, notices, and other window-wide chrome;
-- `services/`: settings and future filesystem/network/OS integrations;
-- `root.rs`: state ownership, actions, subscriptions, and task lifetimes.
+## Template portability
 
-Reusable stateless controls implement `RenderOnce + IntoElement`; they do not
-become entities. Persistent controls (text editing, virtualized data,
-subscriptions) should be entities that implement `Render` or custom `Element`s
-when lower-level layout/paint access is required. See
-`src/app/components/README.md` before adding a control.
+`src/app/` imports its siblings through `crate::app`, never the package name.
+`src/lib.rs` only exports the app and the launcher imports through the crate root.
+This lets `setup.sh --app-only` remove the library and declare `mod app` without
+rewriting the implementation. Minimal setup instead copies the complete
+`examples/hello_world.rs` into `src/main.rs` and removes the showcase.
 
-## Error policy
+## Verification
 
-Failure to create the native window is fatal. An unavailable configuration
-location, corrupt preferences, failed saves, and background operation failures
-are recoverable and become visible notices plus tracing events. Settings writes
-flush a temporary file and use atomic POSIX replacement; Windows preserves and
-rolls back the previous file around its non-replacing rename. This keeps startup
-resilient without swallowing information developers need.
-
-## Accessibility boundary
-
-The pinned GPUI release supports focus traversal and focused styling but does not
-expose semantic role/state or live-announcement APIs for custom elements. The
-starter supplies visible focus, keyboard activation, contrast tests, disabled-tab
-behavior, and narrow stacking; it cannot make its custom controls screen-reader
-complete on 0.2.2. `docs/ACCESSIBILITY.md` is the release checklist and must stay
-accurate when controls or the GPUI version change.
-
-## Testing layers
-
-1. Pure state and serialization tests are fast and platform-neutral.
-2. GPUI tests (`#[gpui::test]`) are appropriate for entity/action behavior once
-   a feature needs simulation; enablement is already available through the
-   dev-dependency.
-3. `cargo check --all-targets` compiles every runnable example.
-4. CI checks macOS, Linux, and Windows because windowing backends differ.
-5. Before release, launch and exercise a packaged application on every platform;
-   compilation is not a replacement for native smoke testing.
+Pure tests cover state, themes, and preferences. GPUI simulation tests are for
+behavior requiring entities, actions, windows, or the executor. Every standalone
+example compiles with `cargo check --all-targets`. Keyboard regression tests
+include key release, since `simulate_keystrokes` alone only sends key-down and
+would miss GPUI’s built-in click activation. CI builds across native
+platforms and tests setup in scratch copies. Before release, exercise real
+windows on each supported platform, including keyboard and graphics behavior.

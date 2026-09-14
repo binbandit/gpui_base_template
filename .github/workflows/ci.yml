@@ -4,6 +4,13 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -14,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Linux GPUI dependencies
         run: |
@@ -61,7 +68,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Linux GPUI dependencies
         run: |
@@ -96,7 +103,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Linux GPUI dependencies
         if: runner.os == 'Linux'
@@ -137,7 +144,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Linux GPUI dependencies
         if: runner.os == 'Linux'
@@ -178,7 +185,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Linux GPUI dependencies
         run: |
@@ -193,10 +200,12 @@ jobs:
 
       - name: A failed generated build restores the input tree
         run: |
-          printf '\nthis is intentionally invalid rust\n' >> src/main.rs
+          printf '\nfn setup_rollback_probe() { missing_setup_symbol(); }\n' >> src/main.rs
           cp Cargo.toml "$RUNNER_TEMP/Cargo.toml.before"
           cp README.md "$RUNNER_TEMP/README.md.before"
           cp src/main.rs "$RUNNER_TEMP/main.rs.before"
+          printf 'Keep my existing backup\n' > Cargo.toml.bak
+          cp Cargo.toml.bak "$RUNNER_TEMP/existing-backup.before"
           if ./setup.sh rollback-test --app-only --yes; then
             echo "setup unexpectedly succeeded" >&2
             exit 1
@@ -205,4 +214,6 @@ jobs:
           cmp README.md "$RUNNER_TEMP/README.md.before"
           cmp src/main.rs "$RUNNER_TEMP/main.rs.before"
           test -e setup.sh
+          cmp Cargo.toml.bak "$RUNNER_TEMP/existing-backup.before"
+          rm Cargo.toml.bak
           test -z "$(find . -path './target' -prune -o -name '*.bak' -print -quit)"

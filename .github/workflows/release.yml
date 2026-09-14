@@ -11,7 +11,24 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  prepare:
+    name: Prepare draft release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Create release if needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+              --title "$GITHUB_REF_NAME" --generate-notes
+          fi
+
   build:
+    needs: prepare
     name: Build (${{ matrix.target.name }})
     runs-on: ${{ matrix.target.os }}
     strategy:
@@ -26,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Linux GPUI dependencies
         if: runner.os == 'Linux'
@@ -54,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           NAME="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name')"
-          IDENT="$(printf '%s' "$NAME" | tr '-' '_')"
+          BUNDLE_NAME="$(printf '%s' "$NAME" | tr '_' '-')"
           STEM="$NAME-$GITHUB_REF_NAME-$TARGET_NAME"
 
           case "$TARGET_KIND" in
@@ -68,7 +85,7 @@ jobs:
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>CFBundleExecutable</key><string>$NAME</string>
-            <key>CFBundleIdentifier</key><string>dev.gpui.$IDENT</string>
+            <key>CFBundleIdentifier</key><string>dev.gpui.$BUNDLE_NAME</string>
             <key>CFBundleName</key><string>$NAME</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleShortVersionString</key><string>${GITHUB_REF_NAME#v}</string>
@@ -106,6 +123,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" --generate-notes 2>/dev/null || true
           gh release upload "$GITHUB_REF_NAME" "$ASSET" "$ASSET.sha256" --clobber
+
+  publish:
+    name: Publish complete release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false

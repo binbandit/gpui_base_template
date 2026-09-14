@@ -16,7 +16,7 @@ mod theme;
 
 use anyhow::{Context as _, Result};
 use gpui::{App, AppContext, Application, Bounds, WindowBounds, WindowOptions, px, size};
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 pub use root::RootView;
@@ -38,6 +38,10 @@ pub fn run() -> Result<()> {
         (None, None) => None,
     };
 
+    if let Some(warning) = &settings_warning {
+        warn!(%warning, "could not load preferences");
+    }
+
     info!(gpui_version = "0.2.2", "starting GPUI application");
 
     Application::new()
@@ -56,7 +60,7 @@ pub fn run() -> Result<()> {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     window_min_size: Some(size(px(720.0), px(520.0))),
                     titlebar: Some(gpui::TitlebarOptions {
-                        title: Some("GPUI Base Framework".into()),
+                        title: Some("GPUI Starter".into()),
                         ..Default::default()
                     }),
                     ..Default::default()

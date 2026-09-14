@@ -1,12 +1,11 @@
 //! Root entity and application coordination.
 //!
 //! Rendering details live in `pages/` and `shell/`; this type owns state,
-//! subscriptions, tasks, and action handlers.
+//! tasks and action handlers.
 
 use crate::app::actions::{
-    CopyInstallCommand, DismissNotice, FocusNext, FocusPrevious, IncrementCounter,
-    NavigateComponents, NavigateOverview, NavigateSettings, Quit, RunSync, ToggleAnimations,
-    ToggleCompactSidebar, ToggleTheme,
+    DismissNotice, FocusNext, FocusPrevious, IncrementCounter, NavigateComponents,
+    NavigateOverview, NavigateSettings, Quit, RunSync, ToggleCompactSidebar, ToggleTheme,
 };
 use crate::app::pages::{self, PageContext};
 use crate::app::services::{AppSettings, SettingsStore};
@@ -14,19 +13,10 @@ use crate::app::shell::{Notice, render_header, render_notice, render_sidebar};
 use crate::app::state::{Route, SyncState};
 use crate::app::theme::Theme;
 use gpui::{
-    App, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, Render,
-    Subscription, Task, Window, div, prelude::*, px,
+    App, Context, FocusHandle, Focusable, IntoElement, Render, Task, Window, div, prelude::*, px,
 };
 use std::time::Duration;
 use tracing::{info, warn};
-
-struct SyncFinished {
-    records: u32,
-}
-
-struct SyncModel;
-
-impl EventEmitter<SyncFinished> for SyncModel {}
 
 /// The starter's root GPUI view.
 ///
@@ -38,15 +28,14 @@ pub struct RootView {
     settings: AppSettings,
     settings_store: SettingsStore,
     sync: SyncState,
-    sync_model: Entity<SyncModel>,
     sync_task: Option<Task<()>>,
-    _sync_subscription: Subscription,
     counter: u32,
     notice: Option<Notice>,
     focus_handle: FocusHandle,
 }
 
 impl RootView {
+    /// Creates the root view and establishes initial keyboard focus.
     pub fn new(
         settings: AppSettings,
         settings_store: SettingsStore,
@@ -54,19 +43,6 @@ impl RootView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let sync_model = cx.new(|_| SyncModel);
-        let sync_subscription =
-            cx.subscribe(&sync_model, |view, _model, event: &SyncFinished, cx| {
-                view.sync = SyncState::Complete {
-                    records: event.records,
-                };
-                view.notice = Some(Notice::success(format!(
-                    "Background sync finished: {} records are ready.",
-                    event.records
-                )));
-                view.sync_task = None;
-                cx.notify();
-            });
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle);
 
@@ -75,47 +51,51 @@ impl RootView {
             settings,
             settings_store,
             sync: SyncState::Idle,
-            sync_model,
             sync_task: None,
-            _sync_subscription: sync_subscription,
-            counter: 12,
+            counter: 0,
             notice: warning.map(Notice::warning),
             focus_handle,
         }
     }
 
-    fn navigate(&mut self, route: Route, cx: &mut Context<Self>) {
+    fn navigate(&mut self, route: Route, window: &mut Window, cx: &mut Context<Self>) {
         self.route = route;
-        self.notice = None;
+        // The previous page may own the focused control. Restore the persistent
+        // root focus before that control disappears so shortcuts keep working.
+        window.focus(&self.focus_handle);
         cx.notify();
     }
 
-    fn navigate_overview(&mut self, _: &NavigateOverview, _: &mut Window, cx: &mut Context<Self>) {
-        self.navigate(Route::Overview, cx);
+    fn navigate_overview(
+        &mut self,
+        _: &NavigateOverview,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.navigate(Route::Overview, window, cx);
     }
 
     fn navigate_components(
         &mut self,
         _: &NavigateComponents,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.navigate(Route::Components, cx);
+        self.navigate(Route::Components, window, cx);
     }
 
-    fn navigate_settings(&mut self, _: &NavigateSettings, _: &mut Window, cx: &mut Context<Self>) {
-        self.navigate(Route::Settings, cx);
+    fn navigate_settings(
+        &mut self,
+        _: &NavigateSettings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.navigate(Route::Settings, window, cx);
     }
 
     fn toggle_theme(&mut self, _: &ToggleTheme, _: &mut Window, cx: &mut Context<Self>) {
         self.settings.theme = self.settings.theme.toggled();
         Theme::set_mode(self.settings.theme, cx);
-        self.persist_settings();
-        cx.notify();
-    }
-
-    fn toggle_animations(&mut self, _: &ToggleAnimations, _: &mut Window, cx: &mut Context<Self>) {
-        self.settings.animations = !self.settings.animations;
         self.persist_settings();
         cx.notify();
     }
@@ -142,32 +122,20 @@ impl RootView {
         }
 
         self.sync = SyncState::Running;
-        self.notice = Some(Notice::info(
-            "Sync is running on GPUI's executor; the window stays responsive.",
-        ));
+        self.notice = Some(Notice::info("Running the demo sync…"));
 
         let timer = cx.background_executor().timer(Duration::from_millis(1_250));
-        let sync_model = self.sync_model.clone();
-        self.sync_task = Some(cx.spawn(async move |_view, cx| {
+        // Keep the task alive with the view. The weak handle supplied by spawn
+        // lets closing the window cancel work without keeping the view alive.
+        self.sync_task = Some(cx.spawn(async move |view, cx| {
             timer.await;
-            let _ = sync_model.update(cx, |_model, cx| {
-                cx.emit(SyncFinished { records: 384 });
+            let _ = view.update(cx, |view, cx| {
+                view.sync = SyncState::Complete { records: 384 };
+                view.notice = Some(Notice::success("Demo sync complete: 384 sample records."));
+                view.sync_task = None;
                 cx.notify();
             });
         }));
-        cx.notify();
-    }
-
-    fn copy_install_command(
-        &mut self,
-        _: &CopyInstallCommand,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        cx.write_to_clipboard(ClipboardItem::new_string(
-            "./setup.sh my-gpui-app --app-only".into(),
-        ));
-        self.notice = Some(Notice::success("Setup command copied to the clipboard."));
         cx.notify();
     }
 
@@ -227,11 +195,9 @@ impl Render for RootView {
             .on_action(cx.listener(Self::navigate_components))
             .on_action(cx.listener(Self::navigate_settings))
             .on_action(cx.listener(Self::toggle_theme))
-            .on_action(cx.listener(Self::toggle_animations))
             .on_action(cx.listener(Self::toggle_compact_sidebar))
             .on_action(cx.listener(Self::increment_counter))
             .on_action(cx.listener(Self::run_sync))
-            .on_action(cx.listener(Self::copy_install_command))
             .on_action(cx.listener(Self::dismiss_notice))
             .on_action(cx.listener(Self::focus_next))
             .on_action(cx.listener(Self::focus_previous))
@@ -259,7 +225,7 @@ impl Render for RootView {
                     ))
                     .child(
                         div()
-                            .id("main-scroll")
+                            .id(("main-scroll", self.route as usize))
                             .flex()
                             .flex_col()
                             .flex_1()
@@ -269,5 +235,138 @@ impl Render for RootView {
                     )
                     .children(render_notice(self.notice.as_ref(), &theme)),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{actions, theme::ThemeMode};
+    use gpui::TestAppContext;
+
+    fn press_key(cx: &mut TestAppContext, window: gpui::AnyWindowHandle, key: &str) {
+        // simulate_keystrokes only emits KeyDown. GPUI's native click behavior
+        // activates focused controls on KeyUp, so exercise both event phases.
+        cx.simulate_keystrokes(window, key);
+        gpui::VisualTestContext::from_window(window, cx).simulate_event(gpui::KeyUpEvent {
+            keystroke: gpui::Keystroke::parse(key).unwrap(),
+        });
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn sync_runs_once_and_keeps_actions_responsive(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        cx.update(|cx| {
+            Theme::install(ThemeMode::Dark, cx);
+            actions::bind_keys(cx);
+        });
+        let window = cx.add_window(|window, cx| {
+            RootView::new(
+                AppSettings::default(),
+                SettingsStore::at(directory.path().join("settings.json")),
+                None,
+                window,
+                cx,
+            )
+        });
+        cx.dispatch_action(window.into(), RunSync);
+        cx.executor().advance_clock(Duration::from_millis(750));
+        cx.dispatch_action(window.into(), RunSync);
+        cx.dispatch_action(window.into(), IncrementCounter);
+        window
+            .update(cx, |view, _, _| {
+                assert_eq!(view.sync, SyncState::Running);
+                assert_eq!(view.counter, 1);
+            })
+            .unwrap();
+        cx.executor().advance_clock(Duration::from_millis(500));
+        cx.run_until_parked();
+        window
+            .update(cx, |view, _, _| {
+                assert_eq!(view.sync, SyncState::Complete { records: 384 });
+                assert!(view.sync_task.is_none());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn shortcuts_survive_removed_and_disabled_controls(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        cx.update(|cx| {
+            Theme::install(ThemeMode::Dark, cx);
+            actions::bind_keys(cx);
+        });
+        let window = cx.add_window(|window, cx| {
+            RootView::new(
+                AppSettings::default(),
+                SettingsStore::at(directory.path().join("settings.json")),
+                None,
+                window,
+                cx,
+            )
+        });
+        // Traverse the shell and focus Overview's counter button. This goes
+        // through real keyboard dispatch instead of invoking action handlers.
+        cx.simulate_keystrokes(window.into(), "tab tab tab tab tab tab");
+        press_key(cx, window.into(), "enter");
+        press_key(cx, window.into(), "space");
+        window
+            .update(cx, |view, _, _| assert_eq!(view.counter, 2))
+            .unwrap();
+        let settings_key = if cfg!(target_os = "macos") {
+            "cmd-,"
+        } else {
+            "ctrl-,"
+        };
+        cx.simulate_keystrokes(window.into(), settings_key);
+        window
+            .update(cx, |view, _, _| assert_eq!(view.route, Route::Settings))
+            .unwrap();
+        cx.simulate_keystrokes(window.into(), "secondary-2");
+        window
+            .update(cx, |view, _, _| assert_eq!(view.route, Route::Components))
+            .unwrap();
+        cx.simulate_keystrokes(window.into(), "secondary-1");
+        window
+            .update(cx, |view, _, _| assert_eq!(view.route, Route::Overview))
+            .unwrap();
+        // Starting a task disables its focused button. The app key context
+        // must remain reachable while that control is unavailable.
+        cx.simulate_keystrokes(window.into(), "tab tab tab tab tab");
+        press_key(cx, window.into(), "enter");
+        window
+            .update(cx, |view, _, _| assert_eq!(view.sync, SyncState::Running))
+            .unwrap();
+        cx.simulate_keystrokes(window.into(), "secondary-2");
+        window
+            .update(cx, |view, _, _| assert_eq!(view.route, Route::Components))
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn navigation_preserves_notice_until_dismissed(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        cx.update(|cx| Theme::install(ThemeMode::Dark, cx));
+        let window = cx.add_window(|window, cx| {
+            RootView::new(
+                AppSettings::default(),
+                SettingsStore::at(directory.path().join("settings.json")),
+                Some("Preferences could not be read".into()),
+                window,
+                cx,
+            )
+        });
+        cx.dispatch_action(window.into(), NavigateSettings);
+        window
+            .update(cx, |view, _, _| {
+                assert_eq!(view.route, Route::Settings);
+                assert!(view.notice.is_some());
+            })
+            .unwrap();
+        cx.dispatch_action(window.into(), DismissNotice);
+        window
+            .update(cx, |view, _, _| assert!(view.notice.is_none()))
+            .unwrap();
     }
 }

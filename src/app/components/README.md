@@ -22,8 +22,11 @@ entity lifetimes, actions, and element composition.
 2. Accept a typed GPUI action when pointer and keyboard activation mean the same
    thing.
 3. Give interactive controls a stable element ID, keyboard behavior, and visible
-   focus treatment.
-4. Remove disabled controls from tab traversal and activation handlers.
+   focus treatment that does not change its layout. GPUI already invokes `on_click` for
+   focused controls on Enter/Space release; do not add a duplicate key handler.
+4. Keep a disabled button’s focus identity (`.tab_index(0)`), disable its tab stop
+   with `.tab_stop(false)`, and omit activation handlers. This preserves the action
+   path if a focused control becomes disabled.
 5. Keep product/domain state in the owning entity; controlled components receive
    their current value as input.
 6. Document GPUI 0.2.2’s accessibility boundary in `docs/ACCESSIBILITY.md`; custom

@@ -1,211 +1,272 @@
 use super::PageContext;
-use crate::app::actions::{CopyInstallCommand, RunSync};
-use crate::app::assets::embedded_image;
-use crate::app::components::{Badge, BadgeTone, Button, ButtonVariant, Card};
-use crate::app::theme::Theme;
-use gpui::{AnyElement, IntoElement, SharedString, div, img, prelude::*, px};
+use crate::app::actions::{IncrementCounter, NavigateComponents, RunSync};
+use crate::app::components::{Badge, BadgeTone, Button, ButtonSize, ButtonVariant};
+use crate::app::state::SyncState;
+use crate::app::theme::{Theme, ThemeMode};
+use gpui::{AnyElement, IntoElement, SharedString, div, prelude::*, px};
 
 pub(super) fn render(context: &PageContext<'_>) -> AnyElement {
     let theme = context.theme;
-    let narrow = context.narrow;
+    let (status, detail, tone) = match context.sync {
+        SyncState::Idle => (
+            "Ready",
+            "Run a sample job to see background work in action.",
+            BadgeTone::Neutral,
+        ),
+        SyncState::Running => (
+            "Running",
+            "Working in the background. You can keep exploring.",
+            BadgeTone::Accent,
+        ),
+        SyncState::Complete { .. } => (
+            "Complete",
+            "The sample job finished. Run it again any time.",
+            BadgeTone::Success,
+        ),
+    };
 
     div()
         .flex()
         .flex_col()
-        .gap_5()
+        .gap_8()
         .child(
-            Card::new().elevated().child(
-                div()
-                    .flex()
-                    .items_start()
-                    .justify_between()
-                    .gap_6()
-                    .when(narrow, |hero| hero.flex_col())
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .gap_3()
-                            .max_w(px(680.0))
-                            .child(
-                                div().flex().child(
-                                    Badge::new("READY TO BUILD").tone(BadgeTone::Accent),
-                                ),
-                            )
-                            .child(
-                                div()
-                                    .text_3xl()
-                                    .line_height(px(42.0))
-                                    .font_weight(gpui::FontWeight::BOLD)
-                                    .text_color(theme.text)
-                                    .child("A polished foundation for native Rust apps."),
-                            )
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .line_height(px(22.0))
-                                    .text_color(theme.text_muted)
-                                    .child("The architectural edges are wired. Product-specific accessibility, signing, and operations stay in your hands."),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_wrap()
-                                    .items_center()
-                                    .gap_3()
-                                    .pt_2()
-                                    .child(
-                                        Button::new(
-                                            "copy-setup",
-                                            "Copy setup command",
-                                            CopyInstallCommand,
-                                        )
-                                        .variant(ButtonVariant::Primary),
-                                    )
-                                    .child(
-                                        Button::new("run-sync", "Run async demo", RunSync)
-                                            .variant(ButtonVariant::Secondary)
-                                            .disabled(context.sync.is_running()),
-                                    ),
-                            ),
-                    )
-                    .when(!narrow, |hero| {
-                        hero.child(
-                            img(embedded_image("mark.png"))
-                                .flex_none()
-                                .size(px(92.0))
-                                .rounded_xl(),
-                        )
-                    }),
-            ),
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .pt_3()
+                .child(
+                    div()
+                        .text_3xl()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child("Make it yours."),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.text_muted)
+                        .child("A small native workspace, ready for your next idea."),
+                ),
         )
         .child(
             div()
                 .flex()
-                .gap_4()
-                .when(narrow, |metrics| metrics.flex_col())
-                .children([
-                    metric(
-                        "INTERACTIONS",
-                        context.counter.to_string(),
-                        "Entity-local state",
-                        theme,
-                    )
-                    .into_any_element(),
-                    metric("BACKGROUND", context.sync.label(), "GPUI executor", theme)
-                        .into_any_element(),
-                    metric(
-                        "THEME",
-                        format!("{:?}", context.settings.theme),
-                        "Persisted preference",
-                        theme,
-                    )
-                    .into_any_element(),
-                ]),
-        )
-        .child(
-            Card::new()
-                .title("Architecture, without ceremony")
+                .flex_col()
+                .rounded_lg()
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.surface)
                 .child(
                     div()
                         .flex()
+                        .items_center()
+                        .justify_between()
                         .gap_4()
-                        .when(narrow, |features| features.flex_col())
-                        .children([
-                            feature(
-                                "01",
-                                "Entities",
-                                "State lives in GPUI's ownership model, with typed updates and notifications.",
-                                theme,
+                        .p_5()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .child("Background job"),
+                                )
+                                .child(Badge::new("Demo")),
+                        )
+                        .child(Badge::new(status).tone(tone)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_6()
+                        .px_5()
+                        .pb_6()
+                        .when(context.narrow, |row| row.flex_col().items_start())
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_xl()
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .child("Sync your workspace"),
+                                )
+                                .child(div().text_sm().text_color(theme.text_muted).child(detail)),
+                        )
+                        .child(
+                            Button::new(
+                                "run-sync",
+                                if context.sync.is_running() {
+                                    "Syncing…"
+                                } else {
+                                    "Run demo sync"
+                                },
+                                RunSync,
                             )
-                            .into_any_element(),
-                            feature(
-                                "02",
-                                "Actions",
-                                "Clicks and shortcuts dispatch the same logical commands.",
-                                theme,
-                            )
-                            .into_any_element(),
-                            feature(
-                                "03",
-                                "Services",
-                                "Persistence, assets, logging, and async work have explicit boundaries.",
-                                theme,
-                            )
-                            .into_any_element(),
-                        ]),
+                            .variant(ButtonVariant::Primary)
+                            .disabled(context.sync.is_running()),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .border_t_1()
+                        .border_color(theme.border)
+                        .when(context.narrow, |row| row.flex_col())
+                        .child(stat(
+                            "Records processed",
+                            match context.sync {
+                                SyncState::Complete { records } => records.to_string(),
+                                _ => "—".into(),
+                            },
+                            theme,
+                        ))
+                        .child(stat("Data source", "Sample data", theme))
+                        .child(stat("Connection", "Local simulation", theme)),
                 ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_4()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child("Explore the workspace"),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .border_t_1()
+                        .border_color(theme.border)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap_4()
+                                .py_5()
+                                .border_b_1()
+                                .border_color(theme.border)
+                                .child(row_description(
+                                    "Shared state",
+                                    "Changes stay with you as you move between pages.",
+                                    theme,
+                                ))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_4()
+                                        .child(
+                                            div()
+                                                .text_lg()
+                                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                                .child(context.counter.to_string()),
+                                        )
+                                        .child(
+                                            Button::new(
+                                                "overview-increment",
+                                                "Add one",
+                                                IncrementCounter,
+                                            )
+                                            .size(ButtonSize::Small),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap_4()
+                                .py_5()
+                                .border_b_1()
+                                .border_color(theme.border)
+                                .child(row_description(
+                                    "Interface kit",
+                                    "Buttons, status labels, and controls you can reuse.",
+                                    theme,
+                                ))
+                                .child(
+                                    Button::new(
+                                        "browse-components",
+                                        "Explore controls",
+                                        NavigateComponents,
+                                    )
+                                    .size(ButtonSize::Small),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap_4()
+                                .py_5()
+                                .border_b_1()
+                                .border_color(theme.border)
+                                .child(row_description(
+                                    "Your preferences",
+                                    "Appearance and navigation are saved on this device.",
+                                    theme,
+                                ))
+                                .child(Badge::new(if context.settings.theme == ThemeMode::Dark {
+                                    "Dark theme"
+                                } else {
+                                    "Light theme"
+                                })),
+                        ),
+                ),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.text_faint)
+                .child("Start small. Replace this workspace with something useful."),
         )
         .into_any_element()
 }
 
-fn metric(
-    label: &'static str,
-    value: impl Into<SharedString>,
-    detail: impl Into<SharedString>,
-    theme: &Theme,
-) -> impl IntoElement {
-    div().flex_1().min_w(px(0.0)).child(
-        Card::new()
-            .child(
-                div()
-                    .text_xs()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(theme.text_faint)
-                    .child(label),
-            )
-            .child(
-                div()
-                    .text_2xl()
-                    .font_weight(gpui::FontWeight::BOLD)
-                    .text_color(theme.text)
-                    .child(value.into()),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.text_muted)
-                    .child(detail.into()),
-            ),
-    )
-}
-
-fn feature(
-    number: &'static str,
-    title: &'static str,
-    body: &'static str,
-    theme: &Theme,
-) -> impl IntoElement {
+fn stat(label: &'static str, value: impl Into<SharedString>, theme: &Theme) -> impl IntoElement {
     div()
         .flex()
         .flex_col()
         .flex_1()
         .min_w(px(0.0))
         .gap_2()
-        .p_4()
-        .rounded_lg()
-        .bg(theme.surface_muted)
-        .child(
-            div()
-                .text_xs()
-                .font_weight(gpui::FontWeight::BOLD)
-                .text_color(theme.accent)
-                .child(number),
-        )
+        .p_5()
+        .child(div().text_xs().text_color(theme.text_faint).child(label))
         .child(
             div()
                 .text_sm()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(theme.text)
-                .child(title),
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .child(value.into()),
         )
+}
+
+fn row_description(title: &'static str, detail: &'static str, theme: &Theme) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_w(px(0.0))
+        .gap_1()
         .child(
             div()
-                .text_xs()
-                .line_height(px(18.0))
-                .text_color(theme.text_muted)
-                .child(body),
+                .text_sm()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .child(title),
         )
+        .child(div().text_xs().text_color(theme.text_muted).child(detail))
 }

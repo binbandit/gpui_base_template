@@ -19,27 +19,11 @@ impl Route {
         }
     }
 
-    pub const fn eyebrow(self) -> &'static str {
-        match self {
-            Self::Overview => "START HERE",
-            Self::Components => "DESIGN SYSTEM",
-            Self::Settings => "PREFERENCES",
-        }
-    }
-
     pub const fn nav_id(self) -> &'static str {
         match self {
             Self::Overview => "nav-overview",
             Self::Components => "nav-components",
             Self::Settings => "nav-settings",
-        }
-    }
-
-    pub const fn compact_label(self) -> &'static str {
-        match self {
-            Self::Overview => "OV",
-            Self::Components => "UI",
-            Self::Settings => "SET",
         }
     }
 
@@ -78,9 +62,9 @@ impl SyncState {
 
     pub fn label(self) -> String {
         match self {
-            Self::Idle => "Ready to sync".into(),
-            Self::Running => "Syncing workspace…".into(),
-            Self::Complete { records } => format!("Synced {records} records"),
+            Self::Idle => "Ready".into(),
+            Self::Running => "Running demo…".into(),
+            Self::Complete { records } => format!("{records} sample records"),
         }
     }
 }
@@ -92,7 +76,7 @@ mod tests {
     #[test]
     fn routes_have_stable_human_labels() {
         assert_eq!(Route::Overview.title(), "Overview");
-        assert_eq!(Route::Components.eyebrow(), "DESIGN SYSTEM");
+        assert_eq!(Route::Components.title(), "Components");
         assert_eq!(Route::Settings.title(), "Settings");
     }
 
@@ -102,7 +86,7 @@ mod tests {
         assert!(SyncState::Running.is_running());
         assert_eq!(
             SyncState::Complete { records: 42 }.label(),
-            "Synced 42 records"
+            "42 sample records"
         );
     }
 }

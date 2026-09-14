@@ -1,5 +1,5 @@
 use crate::app::actions::ToggleTheme;
-use crate::app::components::{Badge, BadgeTone, Button, ButtonSize, ButtonVariant};
+use crate::app::components::{Button, ButtonSize, ButtonVariant};
 use crate::app::services::AppSettings;
 use crate::app::state::{Route, SyncState};
 use crate::app::theme::{Theme, ThemeMode};
@@ -14,51 +14,46 @@ pub(crate) fn render(
 ) -> impl IntoElement {
     div()
         .flex()
+        .flex_none()
         .items_center()
         .justify_between()
-        .h(px(76.0))
+        .h(px(56.0))
         .px_6()
         .border_b_1()
         .border_color(theme.border)
         .child(
             div()
                 .flex()
-                .flex_col()
-                .gap_1()
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(theme.accent)
-                        .child(route.eyebrow()),
-                )
-                .child(
-                    div()
-                        .text_xl()
-                        .font_weight(gpui::FontWeight::BOLD)
-                        .text_color(theme.text)
-                        .child(route.title()),
-                ),
+                .items_center()
+                .gap_3()
+                .text_sm()
+                .when(!compact, |crumb| {
+                    crumb
+                        .child(div().text_color(theme.text_faint).child("Workspace"))
+                        .child(div().text_color(theme.text_faint).child("/"))
+                })
+                .child(div().text_color(theme.text).child(route.title())),
         )
         .child(
             div()
                 .flex()
                 .items_center()
-                .gap_2()
-                .when(!compact, |actions| {
-                    actions.child(Badge::new(sync.label()).tone(if sync.is_running() {
-                        BadgeTone::Warning
-                    } else {
-                        BadgeTone::Neutral
-                    }))
+                .gap_3()
+                .when(sync.is_running(), |actions| {
+                    actions.child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.text_muted)
+                            .child("Syncing…"),
+                    )
                 })
                 .child(
                     Button::new(
                         "theme-button",
                         if settings.theme == ThemeMode::Dark {
-                            "Light mode"
+                            "Light theme"
                         } else {
-                            "Dark mode"
+                            "Dark theme"
                         },
                         ToggleTheme,
                     )

@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 description = "A production-minded starter template for building desktop apps with GPUI"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/binbandit/gpui-base-framework"
-homepage = "https://github.com/binbandit/gpui-base-framework"
+repository = "https://github.com/binbandit/gpui_base_template"
+homepage = "https://github.com/binbandit/gpui_base_template"
 readme = "README.md"
 keywords = ["desktop", "gui", "gpui", "template"]
 categories = ["gui"]
@@ -25,9 +25,10 @@ directories = "6.0"
 # `runtime_shaders` avoids requiring Apple's optional Metal Toolchain just to
 # build on macOS. Release builds can remove it after installing that component.
 gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
-rust-embed = "8.7"
+rust-embed = "8.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tempfile = "3.27.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 

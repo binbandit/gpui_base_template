@@ -77,7 +77,7 @@ src/app/
   pages/              Route-level screen composition
   services/           Settings and future external IO boundaries
   shell/              Sidebar, header, and global notices
-  root.rs             State, tasks, subscriptions, action handlers
+  root.rs             State, tasks, action handlers
   state.rs            Pure product state
   theme.rs            Semantic design tokens and Theme global
   mod.rs              Startup/bootstrap and public surface
@@ -90,7 +90,7 @@ examples/              Self-contained GPUI learning programs
 
 `app::run` configures tracing, loads settings, installs the global semantic theme,
 registers actions, and opens one window whose root is `Entity<RootView>`. RootView
-owns page state, a retained async `Task`, and a retained typed-event `Subscription`.
+owns page state, preferences, notices, and a retained async `Task`.
 Route rendering lives in `pages/`, stable chrome in `shell/`, reusable UI in
 `components/`, and external IO in `services/`. Pure transitions live in `state.rs`;
 assets are embedded. No custom lifecycle shadows GPUI.
@@ -103,11 +103,17 @@ assets are embedded. No custom lifecycle shadows GPUI.
   need invalidation.
 - Dropping a `Task` cancels it. Store tasks or detach deliberately.
 - Dropping a `Subscription` unsubscribes. Store it or detach deliberately.
+- Use `secondary-` for Command on macOS and Ctrl elsewhere; `cmd-` is not portable.
 - Action handlers should represent logical commands; pointer and keyboard input
-  dispatch the same actions.
+  dispatch the same actions. A focused div's `on_click` already handles
+  Enter/Space on key release; do not add a second activation handler or binding.
 - Use globals only for process-wide state. Product state belongs in entities or
   plain structs.
-- A scrollable div needs an element id before `.overflow_scroll()`.
+- Keep the focus identity of a button that becomes disabled; use `.tab_stop(false)`
+  and omit click handlers rather than removing its `.tab_index(0)`. Restore root
+  focus before navigation removes the focused page control.
+- A scrollable div needs an element id before `.overflow_scroll()`. Use distinct
+  IDs for unrelated routes so their scroll offsets do not leak between pages.
 - GPUI 0.2.2 has focus/tab APIs but no public semantic accessibility-role/state
   API. Preserve visible focus and contrast tests, keep `docs/ACCESSIBILITY.md`
   honest, and do not claim assistive-technology compliance without a real audit.
@@ -126,7 +132,9 @@ unwrap them. Do not detach a task merely to silence `must_use`.
 
 Use plain unit tests for `Route`, settings serialization, theme choice, and other
 pure behavior. Use `#[gpui::test]` only when entity/action/executor simulation is
-material. Every example must compile under `cargo check --all-targets`. CI host
+material. Keyboard activation tests must include key release;
+`simulate_keystrokes` sends only key-down, while GPUI invokes focused `on_click`
+on key-up. Every example must compile under `cargo check --all-targets`. CI host
 checks are still not runtime smoke tests; launch native windows before a release.
 
 ## Style

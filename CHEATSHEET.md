@@ -1,174 +1,116 @@
-# GPUI 0.2.2 Cheat Sheet
+# GPUI 0.2.2 cheat sheet
 
-Copy-ready patterns for the exact crates.io API pinned by this template. If a
-current Zed example uses `gpui_platform::application()`, it belongs to a newer
-unreleased API line; do not mix it into this project.
+These fragments use the exact crates.io API pinned in `Cargo.toml`. For complete
+programs, run the files in `examples/` if your setup mode retained them. For API
+details, use the
+[versioned documentation](https://docs.rs/gpui/0.2.2/gpui/).
 
-## Imports
+## Window and root
 
-```rust
-use gpui::{
-    App, AppContext, Application, Bounds, Context, Entity, IntoElement,
-    Render, Window, WindowBounds, WindowOptions, div, prelude::*, px, size,
-};
-```
-
-`AppContext` must be in scope for `cx.new(...)`.
-
-## Application and window
+Import `gpui::prelude::*` for element, rendering, and context extension traits.
+`AppContext` provides `cx.new`. Start with `Application::new()`, then open a window
+whose constructor returns an entity:
 
 ```rust
 Application::new().run(|cx: &mut App| {
-    let bounds = Bounds::centered(None, size(px(900.0), px(640.0)), cx);
-    cx.open_window(
-        WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            ..Default::default()
-        },
-        |_window, cx| cx.new(|cx| RootView::new(cx)),
-    )
+    cx.open_window(WindowOptions::default(), |_window, cx| {
+        cx.new(|_| RootView { count: 0 })
+    })
     .expect("open main window");
-
     cx.on_window_closed(|cx| {
         if cx.windows().is_empty() {
             cx.quit();
         }
     })
-    .detach();
+    .detach(); // Application-lifetime observer.
     cx.activate(true);
 });
 ```
 
-## Root view
+A view builds an element tree each time GPUI renders it:
 
 ```rust
-struct RootView {
-    count: u32,
-}
+struct RootView { count: u32 }
 
 impl Render for RootView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div().size_full().child(format!("Count: {}", self.count))
     }
 }
 ```
 
-## Update an entity
+## Entity updates
 
 ```rust
-let model: Entity<Model> = cx.new(|_| Model::default());
-
+let model = cx.new(|_| Model::default());
 model.update(cx, |model, cx| {
     model.value += 1;
     cx.notify();
 });
-
-let current = model.read(cx).value;
+let value = model.read(cx).value;
 ```
 
-Entity handles do not dereference by themselves; access requires a context.
+Read and update entities through a context. Call `cx.notify()` for changes that
+should invalidate rendering or notify observers. Plain Rust values are sufficient
+when state does not need an entity lifetime.
 
-## Actions and key bindings
+## Actions and keyboard focus
+
+Define logical operations, then bind input to them:
 
 ```rust
-use gpui::{KeyBinding, actions};
-
-actions!(my_app, [Save, Refresh]);
-
-cx.bind_keys([
-    KeyBinding::new("cmd-s", Save, Some("MyApp")),
-    KeyBinding::new("cmd-r", Refresh, Some("MyApp")),
-]);
+gpui::actions!(my_app, [Save]);
+cx.bind_keys([gpui::KeyBinding::new("secondary-s", Save, Some("MyApp"))]);
 ```
 
-Handle actions on an element:
+`secondary` is Command on macOS and Ctrl elsewhere. `cmd` is the platform modifier
+itself; it does not become Ctrl on other systems. See
+[the key syntax](https://docs.rs/gpui/0.2.2/gpui/struct.Keystroke.html#method.parse).
+
+Create and retain a `FocusHandle` on the view; call `window.focus(&focus)` at
+window creation. Include it in the rendered action path:
 
 ```rust
-impl MyView {
-    fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
-        // mutate state
-        cx.notify();
-    }
-}
-
-// In render:
 div()
+    .track_focus(&self.focus)
     .key_context("MyApp")
     .on_action(cx.listener(Self::save))
+    .child(
+        div().id("save").tab_index(0).on_click(|_, window, cx| {
+            window.dispatch_action(Box::new(Save), cx);
+        }).child("Save"),
+    )
 ```
 
-Dispatch the same action from a click:
+An action handler has this shape:
 
 ```rust
-div()
-    .id("save")
-    .on_click(|_, window, cx| {
-        window.dispatch_action(Box::new(Save), cx);
-    })
-    .child("Save")
-```
-
-## Focus
-
-```rust
-struct MyView {
-    focus_handle: gpui::FocusHandle,
-}
-
-impl gpui::Focusable for MyView {
-    fn focus_handle(&self, _: &App) -> gpui::FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
-// During construction:
-let focus_handle = cx.focus_handle();
-window.focus(&focus_handle);
-
-// In render:
-div()
-    .track_focus(&self.focus_handle(cx))
-    .key_context("MyView")
-```
-
-For a custom focusable control, assign `.id(...)` and `.tab_index(0)`. GPUI 0.2.2
-does not install Tab traversal for you: bind `tab`/`shift-tab` actions at the
-root and handle them with `window.focus_next()`/`window.focus_prev()` (see
-`src/app/actions.rs` and `src/app/root.rs`). Add a focused style such as
-`.focus(|style| style.border_2().border_color(theme.focus_ring))`, and omit
-`.tab_index(0)` when a control is disabled. A generic `div` is not automatically
-a keyboard button; handle Enter/Space by dispatching the same logical action as
-its click path.
-
-## Typed entity events
-
-```rust
-struct Saved {
-    records: usize,
-}
-
-struct Model;
-impl gpui::EventEmitter<Saved> for Model {}
-
-// Emitter:
-cx.emit(Saved { records: 12 });
-
-// Subscriber during owner construction:
-let subscription = cx.subscribe(&model, |owner, _model, event: &Saved, cx| {
-    owner.status = format!("Saved {}", event.records);
+fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
+    // Update state or begin an operation.
     cx.notify();
-});
+}
 ```
 
-Store `subscription` on the owner. Dropping it unsubscribes. Use `.detach()` only
-for a deliberate longer lifetime.
+Make the clickable div focusable with `.tab_index(0)` or a retained focus handle,
+and add a visible `.focus(...)` style. GPUI 0.2.2 invokes a focused div's
+`.on_click(...)` on Enter/Space key release. Do not also dispatch the action in
+an Enter/Space binding or key-down handler: that activates the control twice.
+Bind Tab and Shift-Tab to root actions calling `window.focus_next()` and
+`window.focus_prev()`. Keep `.tab_index(0)` on a button that can become disabled
+while focused, use `.tab_stop(!disabled)` to exclude it from further traversal,
+and omit its click handler while disabled. Removing its focus identity can also
+remove the root key context from the focus path. Restore the persistent root
+focus before navigation removes a page that contains the focused control.
+See `examples/counter.rs` or the app's `Button` for the complete pattern. The
+built-in keyboard click behavior is in the published
+[`div` implementation](https://docs.rs/crate/gpui/0.2.2/source/src/elements/div.rs).
 
-## Async task owned by a view
+## View-owned async work
+
+Store the task in `Option<gpui::Task<()>>`:
 
 ```rust
-use std::time::Duration;
-
-let timer = cx.background_executor().timer(Duration::from_secs(1));
+let timer = cx.background_executor().timer(std::time::Duration::from_secs(1));
 self.task = Some(cx.spawn(async move |view, cx| {
     timer.await;
     let _ = view.update(cx, |view, cx| {
@@ -179,164 +121,119 @@ self.task = Some(cx.spawn(async move |view, cx| {
 }));
 ```
 
-Store `Task<()>`; dropping it cancels. Calls through an async/weak context are
-fallible because the app or entity may have closed while awaiting.
+Dropping the task cancels the future. Use `self.task = None` to cancel deliberately;
+closing the view also drops its task. Dropping a future does not undo IO already
+performed or necessarily stop work already handed to another thread.
 
-For CPU/blocking work, spawn a `Send` future on `cx.background_executor()` and
-return the result to a foreground entity update. Do not block `render` or an input
-listener.
+`view` is weak here: the update may fail after the entity has closed. Handle real
+operation failures separately. For expensive work, use the background executor
+and bring the result back through a foreground entity update. Never block a
+render or input callback.
 
-## Global state
+## Events and subscriptions
+
+Use typed events when one entity needs to tell another about a change:
 
 ```rust
-use gpui::{Global, ReadGlobal, UpdateGlobal};
+struct Saved { records: usize }
+struct Model;
+impl gpui::EventEmitter<Saved> for Model {}
 
-#[derive(Clone)]
-struct Theme { /* tokens */ }
-impl Global for Theme {}
+// In the model's Context<Model>:
+cx.emit(Saved { records: 12 });
 
-Theme::set_global(cx, theme);
-let theme = Theme::global(cx).clone();
+// While constructing the subscriber:
+let subscription = cx.subscribe(&model, |owner, _model, event: &Saved, cx| {
+    owner.status = format!("Saved {}", event.records);
+    cx.notify();
+});
 ```
 
-Globals are for process-wide services/tokens. Prefer entities for mutable product
-state and plain values for render-local state.
+Store the `Subscription` on the subscriber. Dropping it unsubscribes; detaching
+is a deliberate lifetime choice. Direct state updates are simpler when there is
+only one owner.
 
-## `RenderOnce` component
+## Stateless components and themes
 
 ```rust
 #[derive(IntoElement)]
-struct Badge {
-    label: gpui::SharedString,
-}
+struct Badge { label: gpui::SharedString }
 
 impl RenderOnce for Badge {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         div().px_2().rounded_full().child(self.label)
     }
 }
 ```
 
-Use `RenderOnce` for owned, stateless builders. Shared controls belong under
-`src/app/components/` and should be exported from its `mod.rs`; keep one-off
-composition in its `pages/` module. Use `Entity<T> + Render` for persistent state,
-subscriptions, focus, or asynchronous work. The component checklist lives in
-`src/app/components/README.md`.
+Use `RenderOnce` for stateless/controlled builders and `Entity<T> + Render` for
+persistent state. Shared controls live in `src/app/components/`; keep page-only
+composition in its page.
 
-## Layout and style
+The app's `Theme` implements `gpui::Global`. `Theme::current(cx)` reads semantic
+tokens such as `text`, `surface`, and `accent`; pages should use those tokens.
+Mutable product state belongs in its owning entity, not in a new global.
+
+## Layout
 
 ```rust
 div()
     .flex()
     .flex_col()
-    .size_full()
     .gap_4()
     .p_6()
-    .bg(gpui::rgb(0x111820))
-    .text_color(gpui::rgb(0xF5F1EA))
-    .child(
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .child("Left")
-            .child("Right"),
-    )
-```
-
-Scrollable divs need an identity in GPUI 0.2.2:
-
-```rust
-div()
-    .id("scroll-region")
-    .flex_1()
-    .overflow_scroll()
-```
-
-## Conditional composition
-
-```rust
-div()
-    .when(is_active, |el| el.bg(theme.accent))
-    .when_some(subtitle, |el, text| el.child(text))
+    .child(div().flex().justify_between().child("Left").child("Right"))
+    .when(is_active, |el| el.bg(theme.surface))
     .children(items.into_iter().map(render_item))
 ```
 
-## Clipboard
+Scrollable divs need an identity and a constrained layout:
 
 ```rust
+div().id("content").flex_1().min_h_0().overflow_y_scroll()
+```
+
+Give separate pages distinct scroll-container IDs. Reusing one ID for unrelated
+routes can carry a previous page’s scroll offset into the next page. The starter
+keys the main scroll container by route.
+
+## Assets and clipboard
+
+`src/app/assets.rs` implements `AssetSource` and startup installs it with
+`Application::new().with_assets(...)`. SVGs resolve through that asset source:
+
+```rust
+gpui::svg().path("mark.svg").size_8().text_color(theme.accent)
+```
+
+For embedded raster images, make the source explicit. Relative strings can be
+parsed as URIs in this release:
+
+```rust
+gpui::img(gpui::ImageSource::Resource(
+    gpui::Resource::Embedded("photo.png".into()),
+))
+
 cx.write_to_clipboard(gpui::ClipboardItem::new_string("copied".into()));
-
-if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-    // use text
-}
+let text = cx.read_from_clipboard().and_then(|item| item.text());
 ```
 
-## Embedded assets
+## Persistence, text input, and tests
 
-```rust
-#[derive(rust_embed::RustEmbed)]
-#[folder = "assets/"]
-struct Assets;
+Keep serialization and IO outside views. The starter's `SettingsStore` loads
+missing fields through `#[serde(default)]`, reports malformed files, and replaces
+settings atomically. Change its configuration identity before users create data.
 
-// Implement gpui::AssetSource, then:
-Application::new().with_assets(Assets).run(|cx| { /* ... */ });
+Correct text editing includes IME, marked ranges, UTF-16 conversion, grapheme
+navigation, shaping, and selection. Adapt the exact
+[upstream input example](https://docs.rs/crate/gpui/0.2.2/source/examples/input.rs),
+not a key handler that appends characters.
 
-// In a view, be explicit about embedded raster resources in GPUI 0.2.2:
-use gpui::{ImageSource, Resource};
+Prefer ordinary `#[test]` for state and serialization. The dev dependency enables
+`#[gpui::test]` for entity/action/executor simulation. `cargo check --all-targets`
+compiles every example. `TestAppContext::simulate_keystrokes` sends key-down
+events only; test focused click activation with a matching `KeyUpEvent` through
+`VisualTestContext::simulate_event`, as the root regression test does.
 
-gpui::img(ImageSource::Resource(Resource::Embedded("mark.png".into())))
-```
-
-GPUI 0.2.2's URI parser accepts some relative strings, so `img("mark.png")`
-can be treated as a network URI. `src/app/assets.rs` provides the complete
-implementation and an `embedded_image` helper that avoids this ambiguity.
-
-## Settings boundary
-
-Keep serialization outside views:
-
-```rust
-#[derive(Default, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-struct Settings {
-    compact: bool,
-}
-```
-
-Use `directories::ProjectDirs`, contextual errors, safe defaults, and a visible
-warning for malformed files. Decide persistent identifiers before release.
-
-## GPUI tests
-
-The dev-dependency enables `test-support`:
-
-```rust
-#[gpui::test]
-fn creates_model(cx: &mut gpui::TestAppContext) {
-    let model = cx.update(|cx| cx.new(|_| Model::default()));
-    assert_eq!(model.read_with(cx, |model, _| model.value), 0);
-}
-```
-
-Prefer plain `#[test]` for pure state/serialization. Add GPUI simulation only when
-the behavior needs entities, windows, key dispatch, or the deterministic executor.
-
-## Text input
-
-Do not implement desktop text input by appending `KeyDownEvent` characters. Correct
-input requires IME/marked ranges, UTF-16 conversion, grapheme navigation, shaped
-text hit testing, selection, and clipboard behavior. Start from the exact 0.2.2
-source:
-
-<https://docs.rs/crate/gpui/0.2.2/source/examples/input.rs>
-
-## Debugging
-
-```bash
-RUST_LOG=gpui_base_framework=debug,gpui=info cargo run
-RUST_BACKTRACE=1 cargo run
-```
-
-On macOS this template uses `runtime_shaders`. If you disable it, install Apple's
-optional build-time compiler with `xcodebuild -downloadComponent MetalToolchain`.
+Use `RUST_LOG=gpui_base_framework=debug,gpui=info cargo run`
+for application logs, and `RUST_BACKTRACE=1 cargo run` for panic backtraces.

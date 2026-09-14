@@ -1,5 +1,5 @@
 use super::PageContext;
-use crate::app::actions::{ToggleAnimations, ToggleCompactSidebar, ToggleTheme};
+use crate::app::actions::{ToggleCompactSidebar, ToggleTheme};
 use crate::app::components::{Card, Toggle};
 use crate::app::theme::{Theme, ThemeMode};
 use gpui::{AnyElement, IntoElement, div, prelude::*};
@@ -10,48 +10,75 @@ pub(super) fn render(context: &PageContext<'_>) -> AnyElement {
     div()
         .flex()
         .flex_col()
-        .gap_5()
+        .gap_6()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .pt_3()
+                .child(
+                    div()
+                        .text_3xl()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child("A space that feels like yours."),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.text_muted)
+                        .child("Changes are saved automatically on this device."),
+                ),
+        )
         .child(
             Card::new()
                 .title("Appearance")
                 .child(Toggle::new(
                     "theme-setting",
-                    "Use light theme",
-                    "Theme changes are semantic and persisted to the platform config directory.",
+                    "Light theme",
+                    "Use a bright canvas and light surfaces.",
                     context.settings.theme == ThemeMode::Light,
                     ToggleTheme,
                 ))
                 .child(Toggle::new(
-                    "animation-setting",
-                    "Enable animation",
-                    "A single preference future features can consistently honor.",
-                    context.settings.animations,
-                    ToggleAnimations,
+                    "compact-setting",
+                    "Compact navigation",
+                    "Show icons in the sidebar. Small windows use this automatically.",
+                    context.settings.compact_sidebar,
+                    ToggleCompactSidebar,
                 )),
         )
-        .child(Card::new().title("Workspace").child(Toggle::new(
-            "compact-setting",
-            "Compact sidebar",
-            "Collapse labels while preserving keyboard navigation and tool structure.",
-            context.settings.compact_sidebar,
-            ToggleCompactSidebar,
-        )))
         .child(
             Card::new()
-                .title("Keyboard map")
+                .title("Keyboard shortcuts")
                 .child(shortcut_row(
-                    "Navigate",
-                    command_shortcut("⌘1 / ⌘2 / ⌘,", "Ctrl+1 / Ctrl+2 / Ctrl+,"),
+                    "Overview",
+                    command_shortcut("⌘1", "Ctrl+1"),
                     theme,
                 ))
                 .child(shortcut_row(
-                    "Toggle theme",
+                    "Components",
+                    command_shortcut("⌘2", "Ctrl+2"),
+                    theme,
+                ))
+                .child(shortcut_row(
+                    "Settings",
+                    command_shortcut("⌘,", "Ctrl+,"),
+                    theme,
+                ))
+                .child(shortcut_row(
+                    "Switch theme",
                     command_shortcut("⌘⇧T", "Ctrl+Shift+T"),
                     theme,
                 ))
                 .child(shortcut_row(
-                    "Run async demo",
+                    "Run demo sync",
                     command_shortcut("⌘R", "Ctrl+R"),
+                    theme,
+                ))
+                .child(shortcut_row(
+                    "Move between controls",
+                    "Tab / Shift+Tab",
                     theme,
                 ))
                 .child(shortcut_row(
@@ -76,19 +103,18 @@ fn shortcut_row(label: &'static str, shortcut: &'static str, theme: &Theme) -> i
         .flex()
         .items_center()
         .justify_between()
-        .py_2()
-        .border_b_1()
-        .border_color(theme.border)
+        .gap_4()
+        .py_1()
         .text_sm()
-        .text_color(theme.text_muted)
-        .child(label)
+        .child(div().text_color(theme.text_muted).child(label))
         .child(
             div()
                 .px_2()
                 .py_1()
                 .rounded_md()
+                .border_1()
+                .border_color(theme.border)
                 .bg(theme.surface_muted)
-                .font_family("monospace")
                 .text_xs()
                 .text_color(theme.text)
                 .child(shortcut),

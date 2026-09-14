@@ -70,8 +70,7 @@ impl<A: Action + Clone> RenderOnce for Button<A> {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::current(cx);
         let disabled = self.disabled;
-        let click_action = self.action.clone();
-        let key_action = self.action;
+        let action = self.action;
         let (background, foreground, border, hover) = match self.variant {
             ButtonVariant::Primary => (
                 theme.accent,
@@ -80,7 +79,7 @@ impl<A: Action + Clone> RenderOnce for Button<A> {
                 theme.accent_hover,
             ),
             ButtonVariant::Secondary => (
-                theme.surface_muted,
+                theme.surface,
                 theme.text,
                 theme.border_strong,
                 theme.surface_hover,
@@ -100,24 +99,36 @@ impl<A: Action + Clone> RenderOnce for Button<A> {
         };
         let (height, horizontal_padding, text_size) = match self.size {
             ButtonSize::Small => (px(32.0), px(12.0), px(12.0)),
-            ButtonSize::Medium => (px(40.0), px(16.0), px(14.0)),
+            ButtonSize::Medium => (px(36.0), px(14.0), px(13.0)),
         };
 
         div()
             .id(self.id)
-            .when(!disabled, |button| button.tab_index(0))
+            // Retain the focus path if a focused control becomes disabled, while
+            // excluding it from subsequent Tab traversal and all activation.
+            .tab_index(0)
+            .tab_stop(!disabled)
             .flex()
             .items_center()
             .justify_center()
             .h(height)
             .px(horizontal_padding)
-            .rounded_lg()
+            .rounded_md()
             .border_1()
             .border_color(border)
-            .focus(|style| style.border_2().border_color(theme.focus_ring))
+            .focus(|style| {
+                style
+                    .border_color(theme.accent_ink)
+                    .shadow(vec![gpui::BoxShadow {
+                        color: theme.focus_ring,
+                        offset: gpui::point(px(0.0), px(0.0)),
+                        blur_radius: px(0.0),
+                        spread_radius: px(2.0),
+                    }])
+            })
             .bg(background)
             .text_size(text_size)
-            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(foreground)
             .cursor_pointer()
             .when(disabled, |button| button.opacity(0.45).cursor_default())
@@ -125,13 +136,9 @@ impl<A: Action + Clone> RenderOnce for Button<A> {
                 button
                     .hover(move |style| style.bg(hover))
                     .on_click(move |_, window, cx| {
-                        window.dispatch_action(click_action.boxed_clone(), cx);
+                        window.dispatch_action(action.boxed_clone(), cx);
                     })
-                    .on_key_down(move |event, window, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            window.dispatch_action(key_action.boxed_clone(), cx);
-                        }
-                    })
+
             })
             .child(self.label)
     }

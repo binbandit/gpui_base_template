@@ -1,54 +1,50 @@
-# Quick Start
+# Quick start
 
-## 1. Create your project
+## Create your app
+
+Install Rust and the native prerequisites listed in [README](README.md), then:
 
 ```bash
-git clone https://github.com/binbandit/gpui-base-framework my-desktop-app
-cd my-desktop-app
-./setup.sh my-desktop-app --app-only
+git clone https://github.com/binbandit/gpui_base_template my-app
+cd my-app
+./setup.sh my-app --app-only
 cargo run
 ```
 
-Use `--minimal` instead of `--app-only` for a one-file hello world with no
-showcase architecture. Run `./setup.sh --help` for all modes.
+`--app-only` keeps the full application as a binary crate. Use `--minimal` for
+just a window and `Render` implementation. Omit the mode flag to retain the
+library and standalone examples. Setup removes itself after successful validation.
 
-## 2. Know where to edit
+If setup has already run, start with `cargo run`; no further setup is needed.
+For a minimal project, edit `src/main.rs`. The remaining steps describe the full
+starter layout.
 
-```text
-src/main.rs                    Tiny launcher
-src/app/root.rs                State, tasks, subscriptions, action handlers
-src/app/actions.rs             Logical commands and shortcuts
-src/app/components/            Public reusable controls and their guide
-src/app/pages/                 One module per route-level screen
-src/app/shell/                 Navigation, header, and global notices
-src/app/services/settings.rs   Persistent preferences boundary
-src/app/state.rs               Pure, unit-testable domain state
-src/app/theme.rs               Semantic light/dark tokens
-src/app/assets.rs              Embedded AssetSource
-```
+## Make it yours
 
-In `--app-only` projects, `src/app/` becomes a module of the binary. Nothing
-else about the architecture changes.
+Setup renames the crate and configuration identity. Change the visible
+“GPUI Starter” title in `src/app/mod.rs` and branding in `src/app/shell/sidebar.rs`
+to your application name.
 
-## 3. Make the starter yours
+1. Change `Route` in `src/app/state.rs` and the screens in `src/app/pages/`.
+2. Adjust navigation and the header in `src/app/shell/`.
+3. Change semantic colors in `src/app/theme.rs`; keep raw colors out of pages.
+4. Define logical commands in `src/app/actions.rs`; dispatch the same action
+   from mouse and keyboard controls. Use `secondary-` for Command on macOS and
+   Ctrl elsewhere. Focused `on_click` handlers already activate on Enter/Space
+   release; adding another handler would fire the command twice.
+5. Keep product state and task ownership in `src/app/root.rs`. Replace the demo
+   timer with your operation, handling closed views after `await`.
+6. Put external IO in `src/app/services/`. Set the `ProjectDirs` identity before
+   users have saved preferences; changing it later requires a migration.
+7. Add reusable UI to `src/app/components/` only when multiple screens need it.
 
-1. Replace the showcase routes in `src/app/state.rs`.
-2. Build route-level screens as modules under `src/app/pages/`.
-3. Put genuinely shared UI in `src/app/components/`; follow its colocated README.
-4. Keep semantic color roles in `theme.rs`; change their values to rebrand.
-5. Add actions first, then bind keys and pointer controls to those actions.
-6. Add slow work with `cx.spawn`; retain or detach every returned `Task`
-   deliberately, or move growing IO into `src/app/services/`.
-7. Change the `ProjectDirs` identity in `services/settings.rs` if you need to
-   migrate existing user data.
-8. Read `docs/ACCESSIBILITY.md`; GPUI 0.2.2 cannot expose semantic roles/states
-   for these custom controls, so resolve that boundary before claiming compliance.
+Start with `examples/counter.rs` if entities/actions are new to you. Examples
+remain available only when setup preserves them; the
+[cheat sheet](CHEATSHEET.md) is retained in full app layouts.
 
-## Commands
+## Check your changes
 
 ```bash
-cargo run
-cargo run --example counter
 cargo fmt --all -- --check
 cargo check --all-targets
 cargo test --all-targets
@@ -56,12 +52,15 @@ cargo clippy --all-targets --all-features -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 ```
 
-## GPUI version warning
+Also launch the application, use the keyboard, resize the window, change themes,
+and restart to verify saved preferences. Check shortcuts after changing pages
+and after a focused button becomes disabled; keep the root focus restoration
+and disabled-button focus path when adapting the controls.
 
-This template pins crates.io `gpui = "=0.2.2"`. Current Zed repository examples
-use a newer, unreleased platform split (`gpui_platform::application()`) and are
-not source-compatible even though the workspace package may still report
-`0.2.2`. Use the examples bundled with this project or the immutable docs.rs
-0.2.2 source when an API differs.
+## Before adding more
 
-See [docs/GPUI_VERSIONING.md](docs/GPUI_VERSIONING.md) before upgrading.
+Use the exact [GPUI 0.2.2 docs](https://docs.rs/gpui/0.2.2/gpui/). Zed `main`
+contains newer APIs; see [versioning](docs/GPUI_VERSIONING.md) before migrating.
+For text editing, adapt the published upstream input example rather than a
+character-at-a-time key handler. Read [accessibility](docs/ACCESSIBILITY.md)
+before choosing controls for a product that needs assistive-technology support.
